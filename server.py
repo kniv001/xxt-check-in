@@ -175,6 +175,8 @@ def auth_guard():
         return None
     if request.path.startswith('/static'):
         return None
+    if request.remote_addr in ('127.0.0.1', '::1'):      # 本机回环免令牌
+        return None
     k = request.args.get('k') or request.cookies.get('k')
     if k == ACCESS_TOKEN:
         return None
@@ -484,18 +486,30 @@ def main():
         ACCESS_TOKEN = secrets.token_hex(8)
 
     print('学习通签到助手 · 浏览器版(学生端)')
-    print('  本机访问: http://127.0.0.1:%d' % args.port)
+    # '::' 绑定在 Windows 上只收 IPv6(v6only),本机回环要用 [::1]
+    print('  本机访问: http://%s:%d' % ('[::1]' if ':' in host else '127.0.0.1', args.port))
     if ACCESS_TOKEN:
         import socket
-        try:
+        ips = []
+        try:                                          # 默认路由出口 IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(('223.5.5.5', 80))
-            ip = s.getsockname()[0]
+            ips.append(s.getsockname()[0])
             s.close()
         except Exception:
-            ip = '<本机IP>'
-        print('  手机访问: http://%s:%d/?k=%s' % (ip, args.port, ACCESS_TOKEN))
+            pass
+        try:                                          # 其余本机 IPv4(多网卡/虚拟网卡)
+            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = info[4][0]
+                if not ip.startswith('127.') and ip not in ips:
+                    ips.append(ip)
+        except Exception:
+            pass
+        print('  手机访问(同一网络内,任选其一):')
+        for ip in ips:
+            print('    http://%s:%d/?k=%s' % (ip, args.port, ACCESS_TOKEN))
         print('  !! 局域网明文 HTTP:同网段设备可访问本服务;令牌为唯一门禁,勿外传。')
+        print('  !! 若手机连不上:见 README「连不上排查」(防火墙放行 / 换 --host :: 走 IPv6)。')
     app.run(host=host, port=args.port, threaded=True, debug=False)
 
 

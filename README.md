@@ -27,6 +27,26 @@ python server.py --lan --port 9000
 - 已签判定只认页面 `zsign_success`;提交响应契约 `success`/`success2`;`validate_`/`checkFace_` 如实上报不绕过。
 - 数据只存本机 `data/accounts.json`(含 cookie,**勿外传/勿入库**)。
 
+## 连不上排查(手机/其它设备访问)
+
+1. **用对地址**:`http://<电脑局域网IP>:8787/?k=<令牌>`(启动时打印,多网卡就逐个试)。
+   手机上的 `127.0.0.1` 指手机自己,必然被拒。
+2. **同一网络**:手机与电脑连同一个 Wi-Fi;手机走流量打不开。
+3. **症状对照**:
+   - `拒绝连接` = 端口没监听 / 绑错地址(确认启动日志有 `Running on all addresses`)。
+   - `一直转圈/超时` = 防火墙或不在同一网络。
+   - `缺少访问令牌` = 地址漏了 `?k=`。
+4. **防火墙**:症状为超时时,管理员终端执行
+   ```
+   netsh advfirewall firewall add rule name="xxt-web" dir=in action=allow protocol=TCP localport=8787
+   ```
+   (本机已检测到 python 的放行规则时无需重复添加。)
+5. **IPv4 不通试 IPv6**(校园网/CERNET 常给全球 IPv6):
+   ```
+   python server.py --lan --host ::
+   ```
+   手机开 `http://[电脑IPv6]:8787/?k=<令牌>`(IPv6 字面量要用方括号)。
+
 ## 安全
 
 - 默认只绑 `127.0.0.1`;`--lan` 时生成访问令牌(URL 带 `?k=`),局域网内仅凭令牌访问;明文 HTTP,同网段设备可达,勿在不可信网络长期开放。

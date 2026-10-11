@@ -2,3 +2,5 @@ data/
 __pycache__/
 *.pyc
 server-test.log
+server-lan.log
+server-v6.log
