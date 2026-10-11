@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>学习通签到助手 · 浏览器版</title>
+<style>
+:root{
+  --primary:#D70015; --bg:#F2F2F7; --surface:#fff; --text:#1C1C1E; --sub:#8E8E93;
+  --green:#34C759; --blue:#0A84FF; --orange:#FF9F0A; --pink:#FF375F; --purple:#BF5AF2;
+  --red:#FF3B30; --border:rgba(0,0,0,.08); --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:40px}
+.wrap{max-width:760px;margin:0 auto;padding:0 14px}
+header{padding:16px 0 8px}
+h1{font-size:22px;font-weight:800}
+h1 small{font-size:11px;color:var(--primary);font-weight:700;vertical-align:6px;margin-left:6px}
+.sub{font-size:12px;color:var(--sub);margin-top:2px}
+.tabs{display:flex;gap:6px;margin:12px 0;background:#E5E5EA;border-radius:12px;padding:3px}
+.tabs button{flex:1;border:0;background:transparent;padding:9px 0;border-radius:10px;font-size:14px;font-weight:600;color:#3C3C43;cursor:pointer}
+.tabs button.on{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.12)}
+.card{background:var(--surface);border-radius:var(--radius);padding:14px;margin-bottom:10px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.spread{justify-content:space-between}
+button.btn{border:0;border-radius:10px;background:var(--primary);color:#fff;font-weight:700;padding:10px 14px;font-size:14px;cursor:pointer}
+button.btn.ghost{background:#fff;color:var(--text);border:1px solid var(--border)}
+button.btn:disabled{opacity:.5}
+button.mini{padding:6px 10px;font-size:12px}
+input,select,textarea{border:1px solid var(--border);border-radius:10px;padding:10px;font-size:14px;width:100%;background:#fff;font-family:inherit}
+textarea{min-height:64px;resize:vertical}
+label.f{display:block;margin:8px 0 4px;font-size:12px;color:var(--sub)}
+.badge{display:inline-block;padding:1px 7px;border-radius:6px;color:#fff;font-size:11px;font-weight:700}
+.state{font-size:12px;font-weight:700}
+.chip{display:inline-block;padding:5px 12px;border-radius:999px;background:#fff;border:1px solid var(--border);font-size:12px;cursor:pointer;margin-right:6px}
+.chip.on{background:var(--text);color:#fff;border-color:var(--text)}
+.muted{color:var(--sub);font-size:12px}
+.entry{border-left:4px solid var(--blue)}
+.entry .title{font-size:13px;color:#3C3C43;margin:3px 0}
+.empty{text-align:center;color:var(--sub);padding:28px 0;font-size:13px;white-space:pre-line}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal.on{display:flex}
+.modal .box{background:#fff;border-radius:18px;padding:18px;width:100%;max-width:520px;max-height:86vh;overflow:auto}
+.modal h3{font-size:17px;margin-bottom:8px}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:rgba(28,28,30,.92);color:#fff;padding:10px 18px;border-radius:999px;font-size:13px;opacity:0;transition:.25s;pointer-events:none;z-index:99;max-width:86vw;text-align:center}
+#toast.on{opacity:1}
+#log{font:11px/1.6 ui-monospace,Consolas,monospace;background:#1C1C1E;color:#E5E5EA;border-radius:10px;padding:10px;max-height:200px;overflow:auto;white-space:pre-wrap}
+.tag{font-size:11px;color:var(--sub)}
+.hr{height:1px;background:var(--border);margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>学习通签到助手<small>浏览器版 · 学生端</small></h1>
+    <div class="sub">多账号 · 自动检测 · 五类型签到 · 纯本地存储</div>
+  </header>
+
+  <div class="tabs">
+    <button id="tab0" class="on" onclick="setTab(0)">签到监测</button>
+    <button id="tab1" onclick="setTab(1)">账号</button>
+    <button id="tab2" onclick="setTab(2)">工具</button>
+  </div>
+
+  <!-- 监测 -->
+  <section id="page0">
+    <div class="card">
+      <div class="row spread">
+        <button class="btn" id="monBtn" onclick="toggleMonitor()">▶ 开始监测</button>
+        <select id="monInterval" style="width:110px" onchange="setInterval_()">
+          <option value="5">5 秒</option><option value="10" selected>10 秒</option>
+          <option value="15">15 秒</option><option value="30">30 秒</option>
+        </select>
+      </div>
+      <div class="row spread" style="margin-top:8px">
+        <span class="muted" id="monStatus">未监测</span>
+        <span class="muted">上次扫描:<span id="lastScan">—</span></span>
+      </div>
+      <div id="courseChips" style="margin-top:8px"></div>
+    </div>
+    <div id="entries"><div class="empty">点击「开始监测」自动检测各账号的进行中签到</div></div>
+  </section>
+
+  <!-- 账号 -->
+  <section id="page1" style="display:none">
+    <div class="card">
+      <div class="row spread"><b>账号终端 (<span id="accCount">0</span>)</b>
+        <button class="btn ghost mini" onclick="refreshValidity()">刷新有效性</button></div>
+      <div id="accList" style="margin-top:8px"></div>
+      <div class="hr"></div>
+      <b>添加账号</b>
+      <label class="f">备注</label><input id="lgRemark" placeholder="如:我的号 / 同学的号">
+      <label class="f">手机号 / 学号 / 账号</label><input id="lgUname">
+      <div class="row" style="margin-top:8px">
+        <input id="lgCode" placeholder="验证码 / 密码" style="flex:2">
+        <button class="btn ghost mini" id="sendBtn" onclick="sendCode()">获取验证码</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" onclick="doLogin('sms')">短信登录</button>
+        <button class="btn ghost" onclick="doLogin('password')">密码登录</button>
+      </div>
+      <div class="hr"></div>
+      <b>导入 cookie(可选)</b>
+      <div class="muted">从手机 root dump 提取的 chaoxing cookie 串,粘贴后自动校验身份并存档。</div>
+      <textarea id="impCookie" placeholder="UID=...; _uid=...; JSESSIONID=..."></textarea>
+      <label class="f">备注(可选)</label><input id="impRemark">
+      <button class="btn ghost" style="margin-top:8px" onclick="importCookie()">导入并校验</button>
+    </div>
+  </section>
+
+  <!-- 工具 -->
+  <section id="page2" style="display:none">
+    <div class="card">
+      <b>批量扫码签到(二维码签)</b>
+      <div class="muted" style="margin:4px 0 10px">上传老师大屏二维码的截图/照片 → 全部有效账号并发提交;失败的可用新码重试。</div>
+      <input type="file" id="batchFile" accept="image/*">
+      <button class="btn" style="margin-top:10px;width:100%" onclick="batchSign()">上传并全员提交</button>
+      <div id="batchOut" style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <b>说明</b>
+      <div class="muted" style="margin-top:4px">
+        · 本工具为学生端:仅使用学生身份可见接口(活动列表/签到页/提交)。<br>
+        · 二维码签的 enc 由服务端逐代签发、自动刷新码约 10 秒一换 —— 截图后尽快提交,失效则重新截图。<br>
+        · 位置签:浏览器定位仅在 https/localhost 可用;局域网 http 访问时请手动填坐标。<br>
+        · 数据只存本机 data/accounts.json,不上传任何服务器。
+      </div>
+    </div>
+    <div class="card">
+      <b>日志</b>
+      <div id="log" style="margin-top:8px"></div>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="modal"><div class="box" id="modalBox"></div></div>
+<div id="toast"></div>
+
+<script>
+const TYPES={'0':['普通签到','var(--green)'],'1':['签到','var(--green)'],'2':['二维码签到','var(--blue)'],
+             '3':['手势签到','var(--orange)'],'4':['位置签到','var(--pink)'],'5':['签到码','var(--purple)']};
+let state={accounts:[],entries:[],monitoring:false,filter:null,timer:null};
+const $=id=>document.getElementById(id);
+function toast(m,ms=2600){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('on'),ms);}
+function logline(m){const el=$('log');el.textContent+=`[${new Date().toLocaleTimeString()}] ${m}\n`;el.scrollTop=el.scrollHeight;}
+async function api(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const j=await r.json().catch(()=>({ok:false,msg:'响应解析失败'}));if(!j.ok&&j.msg)toast(j.msg);return j;}
+
+function setTab(i){for(let k=0;k<3;k++){$('tab'+k).classList.toggle('on',k===i);$('page'+k).style.display=k===i?'':'none';}}
+
+/* ---------- 监测 ---------- */
+async function refreshDetected(){
+  const j=await api('/api/detected');if(!j.ok)return;
+  state.monitoring=j.monitoring;state.entries=j.entries||[];$('lastScan').textContent=j.lastScan||'—';
+  $('monBtn').textContent=j.monitoring?'■ 停止监测':'▶ 开始监测';
+  $('monStatus').textContent=j.monitoring?`监测中 · 每 ${j.interval}s 轮询全部账号`:'未监测';
+  renderCourses();renderEntries();
+}
+function toggleMonitor(){api('/api/monitor',{on:!state.monitoring,interval:+$('monInterval').value}).then(j=>{
+  if(j.ok){refreshDetected();logline(j.monitoring?'开始监测':'停止监测');}});}
+function setInterval_(){if(state.monitoring)api('/api/monitor',{on:true,interval:+$('monInterval').value});}
+function renderCourses(){
+  const cs=[...new Set(state.entries.map(e=>e.classId+'|'+e.courseName))];
+  const box=$('courseChips');box.innerHTML='';
+  if(cs.length<2){state.filter=null;return;}
+  const mk=(val,label)=>{const b=document.createElement('span');b.className='chip'+(state.filter===val?' on':'');
+    b.textContent=label;b.onclick=()=>{state.filter=val;renderCourses();renderEntries();};box.appendChild(b);};
+  mk(null,'全部课程');cs.forEach(c=>{const [id,name]=c.split('|');mk(id,name||id);});
+}
+function renderEntries(){
+  const list=state.entries.filter(e=>!state.filter||e.classId===state.filter)
+    .sort((a,b)=>(a.accName+'').localeCompare(b.accName+'')||a.startTime-b.startTime);
+  const box=$('entries');
+  if(!list.length){box.innerHTML=`<div class="empty">${state.monitoring?'暂无进行中的签到\n发现后会自动出现在这里':'点击「开始监测」自动检测各账号的进行中签到'}</div>`;return;}
+  box.innerHTML=list.map(e=>{
+    const [name,color]=TYPES[e.otherId]||['签到','var(--green)'];
+    const sc=e.state==='成功'||e.state==='已签'?'var(--green)':(e.state||'').startsWith('失败')?'var(--red)':'var(--sub)';
+    return `<div class="card entry" style="border-left-color:${color}">
+      <div class="row spread">
+        <div class="row"><span class="badge" style="background:${color}">${name}</span>
+          <b>${esc(e.accName)}</b></div>
+        <span class="state" style="color:${sc}">${esc(e.state||'待签')}</span></div>
+      <div class="title">${esc(e.courseName)} · ${esc(e.title)}</div>
+      <div class="row spread">
+        <span class="tag">${esc(e.remain||'')} · ID ${e.activeId}</span>
+        <button class="btn mini" onclick='openSign(${JSON.stringify(e.activeId)},${JSON.stringify(e.accId)})'>进入签到 →</button>
+      </div></div>`;}).join('');
+}
+function esc(s){return (s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+/* ---------- 签到面板 ---------- */
+function findEntry(accId,activeId){return state.entries.find(e=>e.accId===accId&&e.activeId===activeId);}
+function openSign(activeId,accId){
+  const e=findEntry(accId,activeId);if(!e)return;
+  const [name,color]=TYPES[e.otherId]||['签到','var(--green)'];
+  let body='';
+  if(e.otherId==='0'||e.otherId==='1'){
+    body=`<div class="muted" style="margin-bottom:12px">普通签:一键直接提交(无需扫码)。</div>
+      <button class="btn" style="width:100%" onclick="doSign('normal')">一键签到</button>`;
+  }else if(e.otherId==='2'){
+    body=`<div class="muted" style="margin-bottom:8px">上传二维码截图(相册图/同桌发来的图均可)。自动刷新码约 10 秒一换,请尽快提交。</div>
+      <input type="file" id="qrFile" accept="image/*" style="margin-bottom:8px">
+      <button class="btn" style="width:100%" onclick="doSignQrFile()">识别并提交</button>
+      <label class="f">或直接粘贴二维码内容</label><textarea id="qrText" placeholder="SIGNIN:aid=...&Code=...&enc=..."></textarea>
+      <button class="btn ghost" style="width:100%;margin-top:8px" onclick="doSignQrText()">用文本提交</button>`;
+  }else if(e.otherId==='3'||e.otherId==='5'){
+    body=`<div class="muted" style="margin-bottom:8px">${e.otherId==='3'?'手势签:按九格数字键盘顺序输入序号串(如 14789)。':'签到码:输入老师公布的 4-8 位数字。'}提交前会先做预校验(避免触发服务端封禁)。</div>
+      <input id="codeVal" placeholder="${e.otherId==='3'?'手势点位串':'签到码(数字)'}">
+      <button class="btn" style="width:100%;margin-top:10px" onclick="doSign('code')">校验并提交</button>`;
+  }else if(e.otherId==='4'){
+    body=`<div class="muted" style="margin-bottom:8px">位置签:地址必填。浏览器定位仅 https/localhost 可用,否则请手填坐标。</div>
+      <div class="row"><input id="lat" placeholder="纬度" style="flex:1"><input id="lon" placeholder="经度" style="flex:1"></div>
+      <label class="f">地址文本(必填)</label><input id="addr" placeholder="如:福建省福州市闽侯县…">
+      <div class="row" style="margin-top:10px">
+        <button class="btn ghost" onclick="geolocate()">获取定位</button>
+        <button class="btn" style="flex:1" onclick="doSign('location')">提交位置签到</button></div>`;
+  }
+  $('modalBox').innerHTML=`<h3><span class="badge" style="background:${color}">${name}</span> ${esc(e.accName)}</h3>
+    <div class="muted" style="margin:6px 0 12px">${esc(e.courseName)} · ${esc(e.title)}<br>
+    ${esc(e.remain||'')} · 状态 ${esc(e.state||'待签')} · ID ${e.activeId}</div>${body}
+    <div class="row" style="margin-top:14px"><button class="btn ghost" style="flex:1" onclick="closeModal()">关闭</button></div>`;
+  $('modal').classList.add('on');
+  $('modal')._ctx={e};
+}
+function closeModal(){$('modal').classList.remove('on');}
+function geolocate(){
+  if(!navigator.geolocation)return toast('浏览器不支持定位');
+  navigator.geolocation.getCurrentPosition(p=>{$('lat').value=p.coords.latitude;$('lon').value=p.coords.longitude;toast('已取到坐标,请补全地址');},
+    e=>toast('定位失败:'+e.message+' (http 局域网下浏览器禁用定位)'));
+}
+async function doSign(kind){
+  const e=$('modal')._ctx.e;const payload={accId:e.accId,activeId:e.activeId};
+  if(kind==='location'){payload.lat=+$('lat').value;payload.lon=+$('lon').value;payload.address=$('addr').value;
+    if(!payload.lat||!payload.lon)return toast('请先获取/填写坐标');}
+  if(kind==='code'){payload.code=$('codeVal').value.trim();if(!payload.code)return toast('请先输入');}
+  const j=await api('/api/sign/'+kind,payload);
+  logline(`${e.accName} ${TYPES[e.otherId][0]}: ${j.msg||''}`);toast(j.msg||'',3500);
+  if(j.ok)closeModal();refreshDetected();
+}
+async function doSignQrFile(){
+  const f=$('qrFile').files[0];if(!f)return toast('请先选择图片');
+  const b64=await fileB64(f);const e=$('modal')._ctx.e;
+  const j=await api('/api/sign/qr',{accId:e.accId,activeId:e.activeId,image:b64});
+  logline(`${e.accName} 二维码签: ${j.msg||''}`);toast(j.msg||'',3500);if(j.ok)closeModal();refreshDetected();
+}
+async function doSignQrText(){
+  const e=$('modal')._ctx.e;const t=$('qrText').value.trim();if(!t)return toast('请粘贴二维码内容');
+  const j=await api('/api/sign/qr',{accId:e.accId,activeId:e.activeId,text:t});
+  logline(`${e.accName} 二维码签: ${j.msg||''}`);toast(j.msg||'',3500);if(j.ok)closeModal();refreshDetected();
+}
+function fileB64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f);});}
+
+/* ---------- 账号 ---------- */
+async function loadAccounts(){const j=await api('/api/accounts');if(!j.ok)return;
+  state.accounts=j.accounts||[];$('accCount').textContent=state.accounts.length;
+  $('accList').innerHTML=state.accounts.map(a=>`<div class="card" style="padding:10px">
+    <div class="row spread"><div><b>${esc(a.remark||a.name||'未命名')}</b>
+      <span class="badge" style="background:${a.expired?'var(--red)':'var(--green)'};margin-left:6px">${a.expired?'已失效':'有效'}</span>
+      <div class="tag">uid ${a.uid} ${a.phone?'· '+a.phone:''} ${a.school?'· '+esc(a.school):''}</div></div>
+      <div class="row"><button class="btn ghost mini" onclick="remarkAcc('${a.id}')">备注</button>
+      <button class="btn ghost mini" onclick="delAcc('${a.id}')">删除</button></div></div></div>`).join('')
+    ||'<div class="empty" style="padding:12px">暂无账号</div>';
+}
+async function sendCode(){const p=$('lgUname').value.trim();const j=await api('/api/accounts/sendcode',{phone:p});
+  toast(j.msg||'');if(j.ok){let n=60;const b=$('sendBtn');b.disabled=true;const h=setInterval(()=>{b.textContent=(--n)+'s';if(n<=0){clearInterval(h);b.disabled=false;b.textContent='获取验证码';}},1000);}}
+async function doLogin(mode){const j=await api('/api/accounts/login',{remark:$('lgRemark').value,uname:$('lgUname').value,code:$('lgCode').value,mode:mode});
+  toast(j.msg||'');logline('登录:'+(j.msg||''));if(j.ok){loadAccounts();}}
+async function importCookie(){const j=await api('/api/accounts/import',{cookie:$('impCookie').value,remark:$('impRemark').value});
+  toast(j.msg||'');logline('导入:'+(j.msg||''));if(j.ok){$('impCookie').value='';loadAccounts();}}
+async function delAcc(id){if(!confirm('删除该账号?'))return;await api('/api/accounts/delete',{id:id});loadAccounts();}
+async function remarkAcc(id){const a=state.accounts.find(x=>x.id===id);const r=prompt('新备注',a.remark||a.name||'');
+  if(r===null)return;await api('/api/accounts/remark',{id:id,remark:r});loadAccounts();}
+async function refreshValidity(){const j=await api('/api/accounts/refresh');if(j.ok){state.accounts=j.accounts;$('accCount').textContent=j.accounts.length;loadAccounts();toast('校验完成');}}
+
+/* ---------- 批量 ---------- */
+async function batchSign(){
+  const f=$('batchFile').files[0];if(!f)return toast('请先选择二维码图片');
+  const b64=await fileB64(f);$('batchOut').innerHTML='<div class="muted">提交中…</div>';
+  const j=await api('/api/sign/batch',{image:b64});
+  if(!j.ok){$('batchOut').innerHTML='';return;}
+  $('batchOut').innerHTML=`<b>${esc(j.summary)}</b><div style="margin-top:6px">`+
+    j.results.map(r=>`<div class="tag">${esc(r.name)}: <span style="color:${r.ok?'var(--green)':'var(--red)'}">${esc(r.msg)}</span></div>`).join('')+'</div>';
+  j.results.forEach(r=>logline(`批量 ${r.name}: ${r.msg}`));
+  refreshDetected();
+}
+
+/* ---------- 启动 ---------- */
+loadAccounts();refreshDetected();
+setInterval(()=>{if(state.monitoring)refreshDetected();},3000);
+</script>
+</body>
+</html>
