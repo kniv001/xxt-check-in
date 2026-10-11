@@ -115,6 +115,7 @@ label.f{display:block;margin:8px 0 4px;font-size:12px;color:var(--sub)}
       <div class="muted" style="margin:4px 0 10px">上传老师大屏二维码的截图/照片 → 全部有效账号并发提交;失败的可用新码重试。</div>
       <input type="file" id="batchFile" accept="image/*">
       <button class="btn" style="margin-top:10px;width:100%" onclick="batchSign()">上传并全员提交</button>
+      <button class="btn ghost" style="margin-top:8px;width:100%" onclick="openCam('batch')">📷 摄像头扫码 → 全员提交</button>
       <div id="batchOut" style="margin-top:10px"></div>
     </div>
     <div class="card">
@@ -134,6 +135,15 @@ label.f{display:block;margin:8px 0 4px;font-size:12px;color:var(--sub)}
 </div>
 
 <div class="modal" id="modal"><div class="box" id="modalBox"></div></div>
+<div class="modal" id="camModal"><div class="box">
+  <h3>摄像头扫码 <span class="muted" id="camHint" style="font-size:12px"></span></h3>
+  <video id="camVideo" playsinline muted style="width:100%;border-radius:12px;background:#000;aspect-ratio:3/4;object-fit:cover"></video>
+  <div class="row" style="margin-top:10px">
+    <span class="muted" id="camTip">对准二维码,识别后自动提交…</span>
+    <span style="flex:1"></span>
+    <button class="btn ghost" onclick="closeCam()">关闭</button>
+  </div>
+</div></div>
 <div id="toast"></div>
 
 <script>
@@ -201,6 +211,7 @@ function openSign(activeId,accId){
     body=`<div class="muted" style="margin-bottom:8px">上传二维码截图(相册图/同桌发来的图均可)。自动刷新码约 10 秒一换,请尽快提交。</div>
       <input type="file" id="qrFile" accept="image/*" style="margin-bottom:8px">
       <button class="btn" style="width:100%" onclick="doSignQrFile()">识别并提交</button>
+      <button class="btn ghost" style="width:100%;margin-top:8px" onclick="openCam('entry')">📷 摄像头扫码(识别后自动提交)</button>
       <label class="f">或直接粘贴二维码内容</label><textarea id="qrText" placeholder="SIGNIN:aid=...&Code=...&enc=..."></textarea>
       <button class="btn ghost" style="width:100%;margin-top:8px" onclick="doSignQrText()">用文本提交</button>`;
   }else if(e.otherId==='3'||e.otherId==='5'){
@@ -273,15 +284,72 @@ async function remarkAcc(id){const a=state.accounts.find(x=>x.id===id);const r=p
 async function refreshValidity(){const j=await api('/api/accounts/refresh');if(j.ok){state.accounts=j.accounts;$('accCount').textContent=j.accounts.length;loadAccounts();toast('校验完成');}}
 
 /* ---------- 批量 ---------- */
+function renderBatch(j){
+  $('batchOut').innerHTML=`<b>${esc(j.summary)}</b><div style="margin-top:6px">`+
+    j.results.map(r=>`<div class="tag">${esc(r.name)}: <span style="color:${r.ok?'var(--green)':'var(--red)'}">${esc(r.msg)}</span></div>`).join('')+'</div>';
+  j.results.forEach(r=>logline(`批量 ${r.name}: ${r.msg}`));
+  refreshDetected();
+}
 async function batchSign(){
   const f=$('batchFile').files[0];if(!f)return toast('请先选择二维码图片');
   const b64=await fileB64(f);$('batchOut').innerHTML='<div class="muted">提交中…</div>';
   const j=await api('/api/sign/batch',{image:b64});
   if(!j.ok){$('batchOut').innerHTML='';return;}
-  $('batchOut').innerHTML=`<b>${esc(j.summary)}</b><div style="margin-top:6px">`+
-    j.results.map(r=>`<div class="tag">${esc(r.name)}: <span style="color:${r.ok?'var(--green)':'var(--red)'}">${esc(r.msg)}</span></div>`).join('')+'</div>';
-  j.results.forEach(r=>logline(`批量 ${r.name}: ${r.msg}`));
-  refreshDetected();
+  renderBatch(j);
+}
+async function batchSignText(text){
+  $('batchOut').innerHTML='<div class="muted">提交中…</div>';
+  const j=await api('/api/sign/batch',{text:text});
+  if(!j.ok){$('batchOut').innerHTML='';return;}
+  renderBatch(j);
+}
+
+/* ---------- 摄像头扫码(需安全上下文:https / localhost;局域网 http 会被浏览器禁用) ---------- */
+let cam={stream:null,timer:null,busy:false,mode:null};
+async function openCam(mode){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    toast('此页面无法使用摄像头:浏览器要求安全上下文(https 或 localhost)。\n可先用「相册选图」;或保持 USB 连接运行 adb reverse tcp:8787 tcp:8787,改用 http://127.0.0.1:8787 打开本页。',6000);
+    return;
+  }
+  cam.mode=mode;cam.busy=false;
+  $('camModal').classList.add('on');
+  $('camHint').textContent=mode==='batch'?'(批量:识别后全员提交)':'(识别后自动提交本条)';
+  $('camTip').textContent='对准二维码,识别后自动提交…';
+  try{
+    cam.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+  }catch(e){toast('摄像头打开失败: '+e.message,4200);closeCam();return;}
+  const v=$('camVideo');v.srcObject=cam.stream;await v.play().catch(()=>{});
+  cam.timer=setInterval(camTick,900);
+}
+function closeCam(){
+  if(cam.timer)clearInterval(cam.timer);cam.timer=null;
+  if(cam.stream){cam.stream.getTracks().forEach(t=>t.stop());cam.stream=null;}
+  $('camModal').classList.remove('on');
+}
+function grabFrame(v){
+  const w=v.videoWidth,h=v.videoHeight;if(!w||!h)return null;
+  const s=Math.min(1,1024/w);
+  const c=document.createElement('canvas');c.width=Math.round(w*s);c.height=Math.round(h*s);
+  c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',0.82);
+}
+async function camTick(){
+  if(cam.busy||!cam.stream)return;
+  const img=grabFrame($('camVideo'));if(!img)return;
+  cam.busy=true;
+  try{
+    const j=await fetch('/api/decode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image:img})}).then(r=>r.json());
+    if(j.ok&&j.text){
+      $('camTip').textContent='已识别,提交中…';
+      const mode=cam.mode;closeCam();
+      if(mode==='batch'){await batchSignText(j.text);}
+      else{const e=$('modal')._ctx&&$('modal')._ctx.e;
+        if(e){const r=await api('/api/sign/qr',{accId:e.accId,activeId:e.activeId,text:j.text});
+          logline(`${e.accName} 摄像头扫码: ${r.msg||''}`);toast(r.msg||'',3500);if(r.ok)closeModal();refreshDetected();}
+        else toast('未绑定签到条目');}
+    }
+  }catch(e){/* 丢帧即可 */}
+  cam.busy=false;
 }
 
 /* ---------- 启动 ---------- */

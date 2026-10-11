@@ -440,6 +440,21 @@ def sign_code():
     return jsonify({'ok': ok, 'msg': msg})
 
 
+@app.post('/api/decode')
+def decode_only():
+    """摄像头/图片帧 → 服务端 OpenCV 解码(浏览器只管采集,不依赖其自带识别)"""
+    d = request.json or {}
+    img = d.get('image') or ''
+    if not img:
+        return jsonify({'ok': False, 'text': '', 'msg': '无图片'})
+    try:
+        text = api.decode_qr(base64.b64decode(img.split(',')[-1]))
+    except Exception as ex:
+        return jsonify({'ok': False, 'text': '', 'msg': '图片解析失败: %s' % ex})
+    return jsonify({'ok': bool(text), 'text': text or '',
+                    'msg': '' if text else '未识别到二维码'})
+
+
 @app.post('/api/sign/batch')
 def sign_batch():
     """批量二维码:一张图 → 全部(或指定)账号并发提交"""
