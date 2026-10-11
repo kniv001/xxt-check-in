@@ -4,3 +4,4 @@ __pycache__/
 server-test.log
 server-lan.log
 server-v6.log
+certs/

@@ -47,6 +47,128 @@ def save_accounts(lst):
     json.dump(lst, open(ACC_FILE, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
 
 
+# ------------------------- HTTPS(本地 CA + 服务器证书) -------------------------
+
+CERT_DIR = os.path.join(ROOT, 'certs')
+
+
+def _local_ips():
+    """本机全部可用地址(默认路由出口优先)"""
+    import socket
+    ips = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('223.5.5.5', 80))
+        ips.append(s.getsockname()[0])
+        s.close()
+    except Exception:
+        pass
+    for fam, probe in ((socket.AF_INET, None), (socket.AF_INET6, None)):
+        try:
+            for info in socket.getaddrinfo(socket.gethostname(), None, fam):
+                ip = info[4][0]
+                if ip.startswith('127.') or ip == '::1' or ip.split('%')[0] in ips:
+                    continue
+                if fam == socket.AF_INET6 and not ip.split('%')[0].startswith('2001:'):
+                    continue                      # 只挑全球 IPv6,不带 link-local
+                ips.append(ip.split('%')[0])
+        except Exception:
+            pass
+    return ips
+
+
+def ensure_certs():
+    """生成/复用本地 CA 与本机服务器证书;返回 (cert_path, key_path)。
+
+    - CA 一次生成长期复用:手机端装一次,之后换 IP 也不用重装;
+    - 服务器证书 SAN=当前全部地址,IP 变化时自动重签。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    os.makedirs(CERT_DIR, exist_ok=True)
+    ca_key_p = os.path.join(CERT_DIR, 'ca.key')
+    ca_crt_p = os.path.join(CERT_DIR, 'ca.crt')
+    srv_key_p = os.path.join(CERT_DIR, 'server.key')
+    srv_crt_p = os.path.join(CERT_DIR, 'server.crt')
+    san_mark = os.path.join(CERT_DIR, '.san')
+
+    now = datetime.now(timezone.utc)
+    if not (os.path.exists(ca_key_p) and os.path.exists(ca_crt_p)):
+        ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'xxt-web local CA')])
+        ca = (x509.CertificateBuilder()
+              .subject_name(name).issuer_name(name)
+              .public_key(ca_key.public_key())
+              .serial_number(x509.random_serial_number())
+              .not_valid_before(now - timedelta(days=1))
+              .not_valid_after(now + timedelta(days=3650))
+              .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+              .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
+                                           key_encipherment=False, data_encipherment=False,
+                                           key_agreement=False, key_cert_sign=True, crl_sign=True,
+                                           encipher_only=False, decipher_only=False), critical=True)
+              .add_extension(x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()), critical=False)
+              .sign(ca_key, hashes.SHA256()))
+        open(ca_key_p, 'wb').write(ca_key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption()))
+        open(ca_crt_p, 'wb').write(ca.public_bytes(serialization.Encoding.PEM))
+
+    sans = ['127.0.0.1', '::1', 'localhost'] + _local_ips()
+    sans = sorted(set(sans))
+    if (os.path.exists(san_mark) and os.path.exists(srv_crt_p) and os.path.exists(srv_key_p)
+            and open(san_mark, encoding='utf-8').read().strip() == '\n'.join(sans)):
+        return srv_crt_p, srv_key_p
+
+    ca_key = serialization.load_pem_private_key(open(ca_key_p, 'rb').read(), password=None)
+    ca_crt = x509.load_pem_x509_certificate(open(ca_crt_p, 'rb').read())
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    alt = []
+    for s in sans:
+        try:
+            import ipaddress
+            alt.append(x509.IPAddress(ipaddress.ip_address(s)))
+        except ValueError:
+            alt.append(x509.DNSName(s))
+    crt = (x509.CertificateBuilder()
+           .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'xxt-web')]))
+           .issuer_name(ca_crt.subject)
+           .public_key(key.public_key())
+           .serial_number(x509.random_serial_number())
+           .not_valid_before(now - timedelta(days=1))
+           .not_valid_after(now + timedelta(days=3650))
+           .add_extension(x509.SubjectAlternativeName(alt), critical=False)
+           .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+           .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+           .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+           .sign(ca_key, hashes.SHA256()))
+    open(srv_key_p, 'wb').write(key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    open(srv_crt_p, 'wb').write(crt.public_bytes(serialization.Encoding.PEM))
+    open(san_mark, 'w', encoding='utf-8').write('\n'.join(sans))
+    return srv_crt_p, srv_key_p
+
+
+def load_or_create_token():
+    """持久化访问令牌(存 data/.token,重启不变,手机书签不用换)"""
+    p = os.path.join(DATA, '.token')
+    try:
+        t = open(p, encoding='utf-8').read().strip()
+        if len(t) >= 16:
+            return t
+    except Exception:
+        pass
+    t = secrets.token_hex(8)
+    os.makedirs(DATA, exist_ok=True)
+    open(p, 'w', encoding='utf-8').write(t)
+    return t
+
+
 def public_account(a):
     return {k: a.get(k) for k in ('id', 'uid', 'name', 'remark', 'phone', 'school', 'uname', 'expired')}
 
@@ -173,7 +295,7 @@ def set_entry_state(acc_id, active_id, state):
 def auth_guard():
     if not ACCESS_TOKEN:
         return None
-    if request.path.startswith('/static'):
+    if request.path.startswith('/static') or request.path == '/ca.crt':
         return None
     if request.remote_addr in ('127.0.0.1', '::1'):      # 本机回环免令牌
         return None
@@ -195,6 +317,12 @@ def set_token_cookie(resp):
 @app.get('/')
 def index():
     return send_from_directory(app.static_folder, 'index.html')
+
+
+@app.get('/ca.crt')
+def ca_file():
+    """方便手机直接下载本地 CA(装机信任用)"""
+    return send_from_directory(CERT_DIR, 'ca.crt', mimetype='application/x-x509-ca-cert')
 
 
 # ------------------------- 账号 API -------------------------
@@ -492,40 +620,43 @@ def main():
     global ACCESS_TOKEN
     ap = argparse.ArgumentParser(description='学习通签到助手 · 浏览器版(学生端)')
     ap.add_argument('--lan', action='store_true', help='绑定 0.0.0.0 供手机浏览器访问(生成访问令牌)')
+    ap.add_argument('--https', action='store_true', help='启用 HTTPS(自签本地 CA)——手机浏览器才能用摄像头')
     ap.add_argument('--port', type=int, default=8787)
     ap.add_argument('--host', default=None)
     args = ap.parse_args()
 
     host = args.host or ('0.0.0.0' if args.lan else '127.0.0.1')
     if host != '127.0.0.1':
-        ACCESS_TOKEN = secrets.token_hex(8)
+        ACCESS_TOKEN = load_or_create_token()
+
+    scheme, ssl_ctx = 'http', None
+    if args.https:
+        try:
+            cert, key = ensure_certs()
+            ssl_ctx = (cert, key)
+            scheme = 'https'
+        except Exception as ex:
+            print('  !! HTTPS 启用失败(证书生成异常,已回落 HTTP): %s' % ex)
 
     print('学习通签到助手 · 浏览器版(学生端)')
     # '::' 绑定在 Windows 上只收 IPv6(v6only),本机回环要用 [::1]
-    print('  本机访问: http://%s:%d' % ('[::1]' if ':' in host else '127.0.0.1', args.port))
+    print('  本机访问: %s://%s:%d' % (scheme, '[::1]' if ':' in host else '127.0.0.1', args.port))
     if ACCESS_TOKEN:
-        import socket
-        ips = []
-        try:                                          # 默认路由出口 IP
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(('223.5.5.5', 80))
-            ips.append(s.getsockname()[0])
-            s.close()
-        except Exception:
-            pass
-        try:                                          # 其余本机 IPv4(多网卡/虚拟网卡)
-            for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-                ip = info[4][0]
-                if not ip.startswith('127.') and ip not in ips:
-                    ips.append(ip)
-        except Exception:
-            pass
         print('  手机访问(同一网络内,任选其一):')
-        for ip in ips:
-            print('    http://%s:%d/?k=%s' % (ip, args.port, ACCESS_TOKEN))
-        print('  !! 局域网明文 HTTP:同网段设备可访问本服务;令牌为唯一门禁,勿外传。')
-        print('  !! 若手机连不上:见 README「连不上排查」(防火墙放行 / 换 --host :: 走 IPv6)。')
-    app.run(host=host, port=args.port, threaded=True, debug=False)
+        for ip in _local_ips():
+            if ':' in ip:
+                print('    %s://[%s]:%d/?k=%s' % (scheme, ip, args.port, ACCESS_TOKEN))
+            else:
+                print('    %s://%s:%d/?k=%s' % (scheme, ip, args.port, ACCESS_TOKEN))
+        if ssl_ctx:
+            print('  HTTPS 证书:本地 CA 自签(手机首次需信任,二选一):')
+            print('    A. 装 CA(推荐,一次管十年):把 %s 装进手机「设置→安全→加密与凭据→安装证书→CA 证书」' % os.path.join(CERT_DIR, 'ca.crt'))
+            print('       也可手机浏览器开 %s://<IP>:%d/ca.crt 下载后再装。' % (scheme, args.port))
+            print('    B. 不装也行:浏览器提示"不是私密连接"→高级→继续前往(部分浏览器仍需装 CA 才给摄像头)。')
+        else:
+            print('  !! 局域网明文 HTTP:手机浏览器将禁用摄像头;需要扫码请加 --https。')
+        print('  !! 令牌为唯一门禁,勿外传。')
+    app.run(host=host, port=args.port, threaded=True, debug=False, ssl_context=ssl_ctx)
 
 
 if __name__ == '__main__':
