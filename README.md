@@ -4,13 +4,18 @@
 
 ## 运行
 
+**Windows 双击(推荐)**
+- `run.bat` —— 后台启动(HTTPS + 局域网),打印电脑/手机访问地址;启动器窗口可直接关,服务在后台
+- `stop.bat` —— 停止服务
+
+**命令行**
 ```bash
-python server.py                 # 只绑本机:浏览器开 http://127.0.0.1:8787
-python server.py --lan           # 供手机浏览器访问(打印带访问令牌的地址)
+python server.py                    # 只绑本机:https://127.0.0.1:8787(无 --https 时为 http)
+python server.py --lan --https      # 手机用(打印带令牌的地址;摄像头需 HTTPS)
 python server.py --lan --port 9000
 ```
 
-依赖:Flask、requests、OpenCV(二维码图像解码)、numpy —— 本机已具备。
+依赖:Flask、requests、OpenCV(二维码图像解码)、numpy、cryptography(HTTPS 证书)—— 本机已具备。
 
 ## 功能
 
