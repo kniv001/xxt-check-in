@@ -53,7 +53,7 @@ def _headers(cookie=None, ua=None, extra=None):
 
 # ------------------------- 通行证 -------------------------
 
-def send_captcha(phone, ua=None, timeout=20):
+def send_captcha(phone, ua=None, timeout=(5, 20)):
     """POST /api/sendcaptcha —— enc = md5(手机号 + 盐 + 毫秒时间戳)"""
     ts = int(time.time() * 1000)
     r = requests.post('https://passport2-api.chaoxing.com/api/sendcaptcha',
@@ -68,7 +68,7 @@ def send_captcha(phone, ua=None, timeout=20):
     return ok, (j.get('mes') or j.get('error') or ('验证码已发送' if ok else '发送失败'))
 
 
-def login(uname, code, is_sms=True, ua=None, timeout=25):
+def login(uname, code, is_sms=True, ua=None, timeout=(5, 25)):
     """POST /v11/loginregister?cx_xxt_passport=json —— 返回 (ok, msg, cookie)"""
     ua = ua or gen_dalvik_ua()
     r = requests.post('https://passport2-api.chaoxing.com/v11/loginregister?cx_xxt_passport=json',
@@ -87,7 +87,7 @@ def login(uname, code, is_sms=True, ua=None, timeout=25):
     return True, '登录成功', cookie
 
 
-def sso_info(cookie, ua=None, timeout=20):
+def sso_info(cookie, ua=None, timeout=(5, 20)):
     """POST sso userLogin4Uname —— 档案/有效性"""
     try:
         r = requests.post('https://sso.chaoxing.com/apis/login/userLogin4Uname.do?_from=passport',
@@ -104,7 +104,7 @@ def sso_info(cookie, ua=None, timeout=20):
 
 # ------------------------- 学生端 -------------------------
 
-def active_list(cookie, ua, status_set=1, timeout=25):
+def active_list(cookie, ua, status_set=1, timeout=(5, 25)):
     """POST educaion/student/activelist —— 返回 (ok, msg, course_json, entries)"""
     try:
         r = requests.post(KETANG + '/education/student/activelist?DB_STRATEGY=DEFAULT',
@@ -131,7 +131,7 @@ def active_list(cookie, ua, status_set=1, timeout=25):
         return False, str(ex), {}, []
 
 
-def presign_page(cookie, ua, uid, course_id, class_id, active_id, timeout=20):
+def presign_page(cookie, ua, uid, course_id, class_id, active_id, timeout=(5, 20)):
     """GET newsign/preSign —— 页面态:渲染 uid + 已签标记(只认 zsign_success)"""
     url = (MOBILELEARN + '/newsign/preSign?courseId=%s&classId=%s&activePrimaryId=%s'
            '&general=1&sys=1&ls=1&appType=15&uid=%s&isTeacherViewOpen=0'
@@ -145,7 +145,7 @@ def presign_page(cookie, ua, uid, course_id, class_id, active_id, timeout=20):
         return {'ok': False, 'uid': str(uid), 'signed': False, 'error': str(ex)}
 
 
-def _stu_sign_get(cookie, ua, query, timeout=15):
+def _stu_sign_get(cookie, ua, query, timeout=(5, 15)):
     try:
         r = requests.get(MOBILELEARN + '/pptSign/stuSignajax?' + query,
                          headers=_headers(cookie=cookie, ua=ua), timeout=timeout)
@@ -188,13 +188,13 @@ def submit_location(cookie, ua, active_id, course_id, class_id, uid, lat, lon, a
                                 'currentFaceId': '', 'ifCFP': '0', 'faceEnc': '', 'faceCode': '',
                                 'locationResult': ''},
                           headers=_headers(cookie=cookie, ua=ua, extra={'Referer': url}),
-                          timeout=15)
+                          timeout=(5, 15))
         return r.text
     except Exception as ex:
         return 'ERROR:%s' % ex
 
 
-def check_sign_code(cookie, ua, active_id, sign_code, timeout=15):
+def check_sign_code(cookie, ua, active_id, sign_code, timeout=(5, 15)):
     """手势/签到码预校验:1=对 / 0=错 / -1=服务端封禁 / -2=接口不可用"""
     try:
         r = requests.get(MOBILELEARN + '/widget/sign/pcStuSignController/checkSignCode',

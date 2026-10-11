@@ -186,6 +186,7 @@ monitor = {
     'on': False, 'interval': 10, 'lastScan': '', 'entries': {}, 'exited': threading.Event(),
 }
 monitor_thread = None
+poll_running = threading.Event()          # 单飞:同一时刻只允许一轮扫描
 
 
 def _merge_poll(results_by_acc, failed):
@@ -226,6 +227,16 @@ TYPES = {'0': '普通签到', '1': '签到', '2': '二维码签到', '3': '手�
 
 
 def poll_once():
+    if poll_running.is_set():                 # 已有扫描在跑(手动/轮询撞车) → 不重入
+        return []
+    poll_running.set()
+    try:
+        return _poll_once_inner()
+    finally:
+        poll_running.clear()
+
+
+def _poll_once_inner():
     accs = [a for a in load_accounts() if not a.get('expired') and a.get('cookie')]
     results, failed = {}, set()
     if not accs:
@@ -430,11 +441,17 @@ def refresh_validity():
 
 # ------------------------- 监测 API -------------------------
 
+@app.get('/api/ping')
+def ping():
+    return jsonify({'ok': True, 't': time.time(), 'polling': poll_running.is_set()})
+
+
 @app.get('/api/detected')
 def detected():
     with lock:
         return jsonify({'ok': True, 'monitoring': monitor['on'],
                         'interval': monitor['interval'], 'lastScan': monitor['lastScan'],
+                        'polling': poll_running.is_set(),
                         'entries': list(monitor['entries'].values())})
 
 
@@ -457,8 +474,14 @@ def set_monitor():
 
 @app.post('/api/scan')
 def scan_once():
-    new_keys = poll_once()
-    return jsonify({'ok': True, 'newKeys': new_keys, 'entries': list(monitor['entries'].values())})
+    """后台触发一轮扫描,立即返回 —— 页面靠 /api/detected 看进度(避免长请求卡死前端)"""
+    started = False
+    if not poll_running.is_set():
+        threading.Thread(target=poll_once, daemon=True).start()
+        started = True
+    with lock:
+        entries = list(monitor['entries'].values())
+    return jsonify({'ok': True, 'started': started, 'polling': True, 'entries': entries})
 
 
 # ------------------------- 签到 API -------------------------
